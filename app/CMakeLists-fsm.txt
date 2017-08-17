@@ -1,0 +1,33 @@
+
+add_library( edsexfat
+       SHARED
+             src/main/native/util/jniutil.c
+             src/fsm/native/edsexfat/raio.c
+             src/fsm/native/edsexfat/edsexfat.c
+             src/fsm/native/edsexfat/libexfat/cluster.c
+             src/fsm/native/edsexfat/libexfat/io.c
+             src/fsm/native/edsexfat/libexfat/log.c
+             src/fsm/native/edsexfat/libexfat/lookup.c
+             src/fsm/native/edsexfat/libexfat/mount.c
+             src/fsm/native/edsexfat/libexfat/node.c
+             src/fsm/native/edsexfat/libexfat/time.c
+             src/fsm/native/edsexfat/libexfat/utf.c
+             src/fsm/native/edsexfat/libexfat/utils.c
+             src/fsm/native/edsexfat/mkfs/cbm.c
+             src/fsm/native/edsexfat/mkfs/fat.c
+             src/fsm/native/edsexfat/mkfs/main.c
+             src/fsm/native/edsexfat/mkfs/mkexfat.c
+             src/fsm/native/edsexfat/mkfs/rootdir.c
+             src/fsm/native/edsexfat/mkfs/uct.c
+             src/fsm/native/edsexfat/mkfs/uctc.c
+             src/fsm/native/edsexfat/mkfs/vbr.c
+)
+
+target_compile_definitions( edsexfat
+                  PRIVATE _FILE_OFFSET_BITS=64)
+
+target_include_directories( edsexfat
+              PRIVATE src/fsm/native/edsexfat/libexfat/ )
+
+target_link_libraries( edsexfat
+                       ${log-lib} )
