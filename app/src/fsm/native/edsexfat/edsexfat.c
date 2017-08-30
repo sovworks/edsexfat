@@ -1,11 +1,14 @@
 #include <inttypes.h>
 #include <asm/errno.h>
 #include <android/log.h>
+#include <exfat.h>
 #include "com_sovworks_eds_fs_exfat_ExFat.h"
 #include "libexfat/exfat.h"
 #include "../util/jniutil.h"
 #include "raio.h"
 #include "mkfs/mkexfat.h"
+
+#define EDSEXFAT_VERSION 1001
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "EDS (native code edsexfat)", __VA_ARGS__);
 
@@ -549,6 +552,66 @@ JNIEXPORT jlong JNICALL Java_com_sovworks_eds_fs_exfat_ExFat_getFreeSpace
     return (jlong)exfat_count_free_clusters(ef)*CLUSTER_SIZE(*ef->sb);
 }
 
+static uint32_t find_last_used_cluster(const struct exfat* ef)
+{
+    uint32_t i;
+
+    for (i = ef->cmap.size - 1; i >= 0; i--)
+        if (BMAP_GET(ef->cmap.chunk, i))
+            break;
+    return i;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_sovworks_eds_fs_exfat_ExFat_getFreeSpaceStartOffset(JNIEnv *env, jobject instance)
+{
+    struct exfat *ef = get_exfat(env, instance);
+    if(ef == NULL)
+        return -1;
+    exfat_debug("[%s]", __func__);
+    uint32_t c = find_last_used_cluster(ef);
+    if(c == -1)
+        c = EXFAT_FIRST_DATA_CLUSTER;
+    else
+        c = c + EXFAT_FIRST_DATA_CLUSTER;
+    if(CLUSTER_INVALID(*ef->sb, c))
+        return -1;
+    return exfat_c2o(ef, c);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sovworks_eds_fs_exfat_ExFat_randFreeSpace(JNIEnv *env, jobject instance)
+{
+    exfat_debug("[%s]", __func__);
+    struct exfat *ef = get_exfat(env, instance);
+    if(ef == NULL)
+        return -1;
+    size_t cluster_size = (size_t) CLUSTER_SIZE(*ef->sb);
+    uint8_t *buf = malloc(cluster_size);
+    if(!buf)
+        return -1;
+
+    srand((unsigned int) time(NULL));
+    for (uint32_t  i = 0; i < ef->cmap.size; i++)
+        if (BMAP_GET(ef->cmap.chunk, i) == 0)
+        {
+            for(int j=0;j<cluster_size;j++)
+                buf[i] = (uint8_t) (rand() % 256);
+
+            uint32_t cluster = i + EXFAT_FIRST_DATA_CLUSTER;
+            if (exfat_pwrite(ef->dev, buf, cluster_size,
+                             exfat_c2o(ef, cluster)) < 0)
+            {
+                exfat_error("failed to write cluster %#x", cluster);
+                free(buf);
+                return -EIO;
+            }
+        }
+    free(buf);
+    return 0;
+}
+
+
 JNIEXPORT jlong JNICALL Java_com_sovworks_eds_fs_exfat_ExFat_getTotalSpace
         (JNIEnv *env, jobject instance)
 {
@@ -626,6 +689,30 @@ JNIEXPORT jint JNICALL Java_com_sovworks_eds_fs_exfat_ExFat_truncate
     exfat_debug("[%s] %"PRId64, __func__, size);
 
     return exfat_truncate(ef, node, (uint64_t) size, true);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sovworks_eds_fs_exfat_ExFat_updateTime(JNIEnv *env, jobject instance, jstring pathString, jlong time)
+{
+    struct timespec tv[2];
+    struct exfat_node* node;
+    struct exfat *ef = get_exfat(env, instance);
+    if(ef == NULL)
+        return -1;
+    const char *path = (*env)->GetStringUTFChars(env, pathString, 0);
+    exfat_debug("[%s] %s %"PRId64, __func__, path, time);
+    int rc = exfat_lookup(ef, &node, path);
+    (*env)->ReleaseStringUTFChars(env, pathString, path);
+    if (rc != 0)
+        return rc;
+    tv[0].tv_sec = (time_t) (time / 1000);
+    tv[0].tv_nsec = (long) ((time % 1000) * 1000000L);
+    tv[1].tv_sec = tv[0].tv_sec;
+    tv[1].tv_nsec = tv[0].tv_nsec;
+    exfat_utimes(node, tv);
+    rc = exfat_flush_node(ef, node);
+    exfat_put_node(ef, node);
+    return rc;
 }
 
 JNIEXPORT jlong JNICALL Java_com_sovworks_eds_fs_exfat_ExFat_openFile
@@ -754,6 +841,12 @@ JNIEXPORT jint JNICALL Java_com_sovworks_eds_fs_exfat_ExFat_makeFS(JNIEnv *env, 
         (*env)->ReleaseStringUTFChars(env, labelString, label);
     exfat_close(dev);
     return res;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sovworks_eds_fs_exfat_ExFat_getVersion(JNIEnv *env, jclass type)
+{
+    return EDSEXFAT_VERSION;
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *jvm, void *reserved)
